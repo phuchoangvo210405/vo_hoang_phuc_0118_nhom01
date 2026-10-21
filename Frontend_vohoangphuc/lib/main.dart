@@ -1,122 +1,180 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'config/config_url.dart';
+import 'models/api_models.dart';
+import 'screens/admin_dashboard.dart';
+import 'screens/auth_screen.dart';
+import 'screens/student_dashboard.dart';
+import 'screens/teacher_dashboard.dart';
+import 'services/api_client.dart';
+import 'services/auth_service.dart';
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  // This widget is the root of your application.
+class _DevHttpOverrides extends HttpOverrides {
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // Fallback to Config_URL.defaultServerUrl (http://157.10.201.16)
+  }
+  HttpOverrides.global = _DevHttpOverrides();
+  runApp(const DiemDanhSvApp());
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class DiemDanhSvApp extends StatefulWidget {
+  const DiemDanhSvApp({super.key});
 
-  void _incrementCounter() {
+  @override
+  State<DiemDanhSvApp> createState() => _DiemDanhSvAppState();
+}
+
+class _DiemDanhSvAppState extends State<DiemDanhSvApp> {
+  late final ApiClient _api = ApiClient(baseUrl: Config_URL.baseUrl);
+  AuthSession? _session;
+
+  @override
+  void initState() {
+    super.initState();
+    _restorePersistedState();
+  }
+
+  /// Theo tài liệu LTDD Tuần 7:
+  /// Kiểm tra `jwt_token` trong SharedPreferences + giải mã role bằng JwtDecoder
+  /// để tự động đăng nhập đúng trang phân quyền (Admin / Giảng viên / Sinh viên).
+  Future<void> _restorePersistedState() async {
+    final savedUrl = await AuthService.loadSavedBaseUrl();
+    if (savedUrl != null && savedUrl.isNotEmpty) {
+      _api.setBaseUrl(savedUrl);
+    }
+    final restored = await AuthService.restoreSession();
+    if (!mounted || restored == null) return;
+    final validated = await AuthService.validateOrRefreshSession(
+      restored,
+      _api,
+    );
+    if (!mounted) return;
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _session = validated;
+      _api.setToken(validated?.token);
+    });
+  }
+
+  void _handleAuthenticated(AuthSession session) {
+    AuthService.saveSession(session);
+    setState(() {
+      _session = session;
+      _api.setToken(session.token);
+    });
+  }
+
+  void _handleLogout() {
+    AuthService.clearActiveSession();
+    setState(() {
+      _session = null;
+      _api.setToken(null);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+    const primaryColor = Color(0xFF4F46E5);
+
+    return MaterialApp(
+      title: 'Điểm Danh SV - Nhóm 01',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: primaryColor,
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF312E81),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: false,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFFF8FAFC),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 13,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: primaryColor, width: 1.8),
+          ),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: primaryColor,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
-          ],
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
+      home: _buildHomeByRole(),
+    );
+  }
+
+  /// Câu 3: Phân quyền người dùng sau khi xác thực OTP thành công
+  Widget _buildHomeByRole() {
+    final s = _session;
+    if (s == null) {
+      return AuthScreen(api: _api, onAuthenticated: _handleAuthenticated);
+    }
+    if (s.isAdmin) {
+      return AdminDashboard(
+        api: _api,
+        session: s,
+        onLogout: _handleLogout,
+      );
+    }
+    if (s.isTeacher) {
+      return TeacherDashboard(
+        api: _api,
+        session: s,
+        onLogout: _handleLogout,
+      );
+    }
+    return StudentDashboard(
+      api: _api,
+      session: s,
+      onLogout: _handleLogout,
     );
   }
 }
